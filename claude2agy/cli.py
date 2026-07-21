@@ -103,8 +103,9 @@ def main():
             print("\n" + "=" * 60)
             print("✨ CONVERSION COMPLETED SUCCESSFULLY!")
             print(f"📌 Session ID: {session_id}")
-            print("👉 Run the following command in your terminal to open the session:")
-            print(f"\n   agy --conversation {session_id}\n")
+            print("👉 Run either of the following commands in your terminal to open the session:")
+            print(f"\n   agy -c")
+            print(f"   agy --conversation {session_id}\n")
             print("=" * 60)
 
     except Exception as e:
