@@ -13,73 +13,42 @@ Công cụ giúp chuyển đổi lịch sử hội thoại giữa **Claude Code*
 
 ---
 
-## Yêu cầu hệ thống
+## Cài đặt nhanh bằng 1 câu lệnh (One-Line Install)
 
-- **Hệ điều hành**: Linux, macOS, hoặc Windows (WSL/Git Bash).
-- **Python**: Python 3.8 trở lên (kiểm tra bằng lệnh `python3 --version`).
-- Chỉ sử dụng thư viện chuẩn của Python, không cần cài đặt thêm thư viện bên ngoài.
+### 1. Trên Linux, macOS, WSL hoặc Git Bash (Windows)
 
----
-
-## Hướng dẫn sử dụng cho người mới
-
-### Bước 1: Clone dự án về máy
-
-Mở Terminal và chạy các lệnh:
+Mở Terminal và dán câu lệnh sau:
 
 ```bash
-# Clone repository từ GitHub
-git clone https://github.com/<username>/claude2agy.git
-
-# Di chuyển vào thư mục dự án
-cd claude2agy
+curl -fsSL https://raw.githubusercontent.com/<username>/claude2agy/main/install.sh | bash
 ```
 
 ---
 
-### Bước 2: Lựa chọn cách chạy công cụ
+### 2. Trên Windows (PowerShell)
 
-Bạn có thể chọn một trong hai cách dưới đây:
+Mở PowerShell và dán câu lệnh sau:
 
-#### Cách 1: Sử dụng ngay bằng `./run.sh` (Không cần cài đặt)
-
-Phù hợp nếu bạn muốn sử dụng ngay sau khi clone mà không thay đổi môi trường hệ thống.
-
-```bash
-# Cấp quyền thực thi cho script (chỉ làm lần đầu)
-chmod +x run.sh
-
-# Chuyển từ Claude Code sang Antigravity:
-./run.sh
-
-# Chuyển ngược từ Antigravity sang Claude Code:
-./run.sh --reverse
+```powershell
+iwr -useb https://raw.githubusercontent.com/<username>/claude2agy/main/install.ps1 | iex
 ```
 
-#### Cách 2: Cài đặt lệnh vào hệ thống bằng `pip`
-
-Phù hợp khi dùng thường xuyên. Sau khi cài đặt, bạn có thể gọi lệnh từ bất kỳ thư mục dự án nào.
-
-```bash
-pip install -e .
-```
-
-Sau khi cài đặt xong, di chuyển tới thư mục dự án bất kỳ và gõ:
-```bash
-claude2agy     # Chuyển từ Claude Code -> Antigravity
-agy2claude     # Chuyển từ Antigravity -> Claude Code
-```
+*Lưu ý: Sau khi cài đặt xong, hãy khởi động lại Terminal để hệ thống nhận 2 lệnh `claude2agy` và `agy2claude`.*
 
 ---
 
-## Chi tiết các thao tác
+## Hướng dẫn sử dụng
+
+Sau khi cài đặt, bạn di chuyển vào **thư mục dự án bất kỳ** và chạy lệnh:
 
 ### 1. Chuyển từ Claude Code sang Antigravity (`claude2agy`)
 
-1. Di chuyển vào thư mục dự án của bạn (ví dụ: `cd ~/projects/my-app`).
-2. Chạy lệnh `claude2agy` (hoặc `./run.sh`).
-3. Dùng phím mũi tên `↑` / `↓` để chọn phiên chat và nhấn `Enter`.
-4. Sao chép câu lệnh được tạo ra và chạy để tiếp tục hội thoại:
+```bash
+cd /path/to/your-project
+claude2agy
+```
+1. Danh sách phiên chat Claude Code thuộc dự án sẽ xuất hiện. Dùng phím `↑` / `↓` chọn và nhấn `Enter`.
+2. Sao chép câu lệnh được tạo ra và chạy để tiếp tục hội thoại:
    ```bash
    agy --conversation <SESSION_ID>
    ```
@@ -88,10 +57,31 @@ agy2claude     # Chuyển từ Antigravity -> Claude Code
 
 ### 2. Chuyển từ Antigravity sang Claude Code (`agy2claude`)
 
-1. Di chuyển vào thư mục dự án của bạn.
-2. Chạy lệnh `agy2claude` (hoặc `./run.sh --reverse`).
-3. Chọn phiên chat Antigravity muốn chuyển đổi từ danh sách.
-4. File `.jsonl` sẽ tự động được xuất vào thư mục lưu trữ của Claude Code (`~/.claude/projects/`).
+```bash
+cd /path/to/your-project
+agy2claude
+```
+1. Chọn phiên chat Antigravity muốn chuyển đổi từ menu.
+2. File `.jsonl` sẽ tự động xuất vào thư mục của Claude Code (`~/.claude/projects/`).
+
+---
+
+## Cài đặt thủ công (Manual Installation)
+
+Nếu không dùng 1-line install, bạn có thể clone dự án thủ công:
+
+```bash
+git clone https://github.com/<username>/claude2agy.git
+cd claude2agy
+
+# Cách A: Dùng ngay bằng script
+chmod +x run.sh
+./run.sh                  # Claude Code -> Antigravity
+./run.sh --reverse        # Antigravity -> Claude Code
+
+# Cách B: Cài đặt lệnh vào hệ thống bằng pip
+pip install -e .
+```
 
 ---
 
@@ -111,11 +101,10 @@ agy2claude     # Chuyển từ Antigravity -> Claude Code
 - **Nguyên nhân**: Thư mục hiện tại chưa từng được sử dụng với Claude Code hoặc chưa có file log trong `~/.claude/projects/`.
 - **Khắc phục**: Di chuyển (`cd`) chính xác vào thư mục dự án mà bạn đã chạy Claude Code trước đó.
 
-### 2. Lỗi "Permission denied" khi chạy `./run.sh`
-- **Khắc phục**: Chạy `chmod +x run.sh` để cấp quyền thực thi.
+### 2. Lỗi "command not found: claude2agy" sau khi cài đặt
+- **Khắc phục**: 
+  - Khởi động lại Terminal.
+  - Hoặc thêm `export PATH="$HOME/.local/bin:$PATH"` vào file `~/.bashrc` (hoặc `~/.zshrc`).
 
-### 3. Không tìm thấy lệnh `claude2agy` sau khi `pip install`
-- **Nguyên nhân**: Thư mục chứa file thực thi của pip chưa có trong biến môi trường `PATH`.
-- **Khắc phục**: Thêm `export PATH="$HOME/.local/bin:$PATH"` vào file `~/.bashrc` (hoặc `~/.zshrc`), hoặc sử dụng `./run.sh`.
 
 
