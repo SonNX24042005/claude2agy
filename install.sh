@@ -30,7 +30,7 @@ if [ -d "$SCRIPT_DIR/claude2agy" ]; then
     cp "$SCRIPT_DIR/run.sh" "$INSTALL_DIR/" 2>/dev/null || true
 else
     # Downloading from GitHub repository
-    REPO_URL="${CLAUDE2AGY_REPO_URL:-https://github.com/Antigravity/claude2agy.git}"
+    REPO_URL="${CLAUDE2AGY_REPO_URL:-https://github.com/SonNX24042005/claude2agy.git}"
     if [ -d "$INSTALL_DIR/.git" ]; then
         echo "Updating existing installation in $INSTALL_DIR..."
         git -C "$INSTALL_DIR" pull --quiet || true
@@ -39,7 +39,7 @@ else
         if command -v git &>/dev/null; then
             git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
         else
-            curl -fsSL "https://raw.githubusercontent.com/Antigravity/claude2agy/main/run.sh" -o "$INSTALL_DIR/run.sh"
+            curl -fsSL "https://raw.githubusercontent.com/SonNX24042005/claude2agy/main/run.sh" -o "$INSTALL_DIR/run.sh"
         fi
     fi
 fi

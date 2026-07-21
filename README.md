@@ -20,7 +20,7 @@ Công cụ giúp chuyển đổi lịch sử hội thoại giữa **Claude Code*
 Mở Terminal và dán câu lệnh sau:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<username>/claude2agy/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SonNX24042005/claude2agy/main/install.sh | bash
 ```
 
 ---
@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/<username>/claude2agy/main/install.
 Mở PowerShell và dán câu lệnh sau:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/<username>/claude2agy/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/SonNX24042005/claude2agy/main/install.ps1 | iex
 ```
 
 *Lưu ý: Sau khi cài đặt xong, hãy khởi động lại Terminal để hệ thống nhận 2 lệnh `claude2agy` và `agy2claude`.*
@@ -71,7 +71,7 @@ agy2claude
 Nếu không dùng 1-line install, bạn có thể clone dự án thủ công:
 
 ```bash
-git clone https://github.com/<username>/claude2agy.git
+git clone https://github.com/SonNX24042005/claude2agy.git
 cd claude2agy
 
 # Cách A: Dùng ngay bằng script

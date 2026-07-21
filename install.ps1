@@ -28,7 +28,7 @@ if ($ScriptDir -and (Test-Path (Join-Path $ScriptDir "claude2agy"))) {
     Copy-Item -Path (Join-Path $ScriptDir "claude2agy") -Destination $InstallDir -Recurse -Force
 } else {
     Write-Host "Downloading source code..."
-    $ZipUrl = "https://github.com/Antigravity/claude2agy/archive/refs/heads/main.zip"
+    $ZipUrl = "https://github.com/SonNX24042005/claude2agy/archive/refs/heads/main.zip"
     $ZipPath = Join-Path $env:TEMP "claude2agy.zip"
     Invoke-WebRequest -Uri $ZipUrl -OutFile $ZipPath
     Expand-Archive -Path $ZipPath -DestinationPath $env:TEMP -Force
