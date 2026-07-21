@@ -15,21 +15,25 @@ class ClaudeToAgyConverter:
 
     @staticmethod
     def get_project_sessions(target_cwd=None):
-        """Discover and list all Claude session logs matching the project folder."""
+        """Discover and list ALL Claude session logs strictly belonging to the target project folder."""
         target_cwd = os.path.abspath(target_cwd or os.getcwd())
-        folder_name = os.path.basename(target_cwd)
-        sanitized = target_cwd.strip("/").replace("/", "-")
+        sanitized = "-" + target_cwd.strip("/").replace("/", "-")
         
         projects_dir = os.path.expanduser("~/.claude/projects")
         if not os.path.exists(projects_dir):
             return []
 
+        # Find matching directory strictly for the current project
         matching_dirs = []
-        for d in os.listdir(projects_dir):
-            full_p = os.path.join(projects_dir, d)
-            if os.path.isdir(full_p):
-                if folder_name in d or d in sanitized or sanitized in d:
-                    matching_dirs.append(full_p)
+        target_folder = os.path.join(projects_dir, sanitized)
+
+        if os.path.exists(target_folder):
+            matching_dirs.append(target_folder)
+        else:
+            # Fallback strict directory name match
+            for d in os.listdir(projects_dir):
+                if d == sanitized:
+                    matching_dirs.append(os.path.join(projects_dir, d))
 
         jsonl_files = []
         for md in matching_dirs:
@@ -53,7 +57,6 @@ class ClaudeToAgyConverter:
                             elif isinstance(c, str):
                                 txt = c
                             
-                            # Clean prompt text
                             if txt and not txt.startswith("<local-command") and not txt.startswith("<command-name>") and not txt.startswith("<task-notification>"):
                                 if "<ide_opened_file>" in txt:
                                     txt = txt.split("</ide_opened_file>")[-1]
@@ -129,7 +132,6 @@ class ClaudeToAgyConverter:
         first_prompt = self.user_messages[0]
         print("🚀 Initializing native Antigravity session with auto-permissions...")
         
-        # Use --dangerously-skip-permissions to ensure full AI responses complete without stalling on prompts
         res = subprocess.run(["agy", "--dangerously-skip-permissions", "-p", first_prompt], cwd=self.target_cwd, capture_output=True, text=True)
         
         conversations_dir = os.path.expanduser("~/.gemini/antigravity-cli/conversations")
