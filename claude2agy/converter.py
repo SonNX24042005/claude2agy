@@ -357,12 +357,28 @@ class ClaudeToAgyConverter:
 
         now_iso = datetime.now().isoformat() + "Z"
 
+        # Build comprehensive CHECKPOINT summary content listing ALL user prompts
+        user_prompts_summary_lines = []
+        for idx, pair in enumerate(self.qa_pairs):
+            u_str = pair.get("user", "").strip().replace("\n", " ")
+            if len(u_str) > 120:
+                u_str = u_str[:120] + "..."
+            user_prompts_summary_lines.append(f"{idx + 1}. {u_str}")
+
+        prompt_summary_text = "\n".join(user_prompts_summary_lines)
         first_u = self.qa_pairs[0].get("user", "").strip() if self.qa_pairs else "Imported Claude Session"
-        cp_content = f"{{{{ CHECKPOINT 0 }}}}\n\n# USER Objective:\n{first_u[:100]}\n\n# User Requests\n1. {first_u[:100]}\n"
+
+        cp_content = (
+            f"{{{{ CHECKPOINT 0 }}}}\n\n"
+            f"# USER Objective:\n{first_u[:200]}\n\n"
+            f"# Complete User Prompts History ({len(self.qa_pairs)} prompts imported):\n"
+            f"{prompt_summary_text}\n"
+        )
 
         steps = []
         step_idx = 0
 
+        # Exact 1-to-1 mapping with SQLite steps table indices
         for i, pair in enumerate(self.qa_pairs):
             u_text = pair.get("user", "")
             a_text = pair.get("assistant", "")
@@ -381,27 +397,39 @@ class ClaudeToAgyConverter:
             })
             step_idx += 1
 
-            if i == 0:
-                steps.append({
-                    "step_index": step_idx,
-                    "source": "SYSTEM",
-                    "type": "CHECKPOINT",
-                    "status": "DONE",
-                    "created_at": ts,
-                    "content": cp_content
-                })
-                step_idx += 1
+            asst_content = a_text.strip() if a_text and a_text.strip() else "Completed."
+            steps.append({
+                "step_index": step_idx,
+                "source": "MODEL",
+                "type": "PLANNER_RESPONSE",
+                "status": "DONE",
+                "created_at": ts,
+                "content": asst_content
+            })
+            step_idx += 1
 
-            if a_text and a_text.strip():
-                steps.append({
-                    "step_index": step_idx,
-                    "source": "MODEL",
-                    "type": "PLANNER_RESPONSE",
-                    "status": "DONE",
-                    "created_at": ts,
-                    "content": a_text.strip()
-                })
-                step_idx += 1
+        # Append CHECKPOINT step aligned with final step_idx
+        steps.append({
+            "step_index": step_idx,
+            "source": "SYSTEM",
+            "type": "CHECKPOINT",
+            "status": "DONE",
+            "created_at": now_iso,
+            "content": cp_content
+        })
+
+        # Add matching CHECKPOINT row to SQLite steps DB to keep indices 100% in sync
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO steps (idx, step_type, status, has_subtrajectory, metadata, error_details, permissions, task_details, render_info, step_payload, step_format) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (step_idx, 98, 3, "false", None, None, None, None, None, None, 0)
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"⚠️ Warning appending CHECKPOINT to SQLite steps DB: {e}")
 
         with open(transcript_path, "w", encoding="utf-8") as f:
             for s in steps:
