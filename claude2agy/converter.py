@@ -3,6 +3,9 @@ import json
 import sqlite3
 import subprocess
 import glob
+import re
+import uuid
+import shutil
 from datetime import datetime
 
 class ClaudeToAgyConverter:
@@ -100,193 +103,303 @@ class ClaudeToAgyConverter:
         self.turns = []
         self.user_messages = []
         self.assistant_messages = []
+        self.qa_pairs = []
 
         now_iso = datetime.now().isoformat() + "Z"
+        curr_user_text = None
+        curr_user_ts = now_iso
+        curr_assistant_texts = []
 
         with open(self.claude_jsonl_path, "r", encoding="utf-8") as f:
             for line in f:
+                if not line.strip():
+                    continue
                 try:
-                    raw = json.loads(line)
-                    if not self.session_id and raw.get("sessionId"):
-                        self.session_id = raw.get("sessionId")
+                    data = json.loads(line)
+                    if not self.session_id and data.get("sessionId"):
+                        self.session_id = data.get("sessionId")
 
-                    m_type = raw.get("type")
-                    msg = raw.get("message", {})
-                    timestamp = raw.get("timestamp", now_iso)
+                    m_type = data.get("type")
+                    msg = data.get("message", {})
+                    timestamp = data.get("timestamp", now_iso)
 
                     if m_type == "user":
                         content = msg.get("content")
-                        text = ""
-                        if isinstance(content, list):
-                            text = "".join([item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text"])
-                        elif isinstance(content, str):
-                            text = content
+                        text_parts = []
 
-                        cleaned = self.clean_user_text(text)
-                        if cleaned:
-                            self.user_messages.append(cleaned)
-                            self.turns.append({
-                                "role": "user",
-                                "content": cleaned,
-                                "timestamp": timestamp
-                            })
+                        if isinstance(content, str):
+                            cleaned = self.clean_user_text(content)
+                            if cleaned:
+                                text_parts.append(cleaned)
+                        elif isinstance(content, list):
+                            for item in content:
+                                if isinstance(item, dict):
+                                    # Ignore tool_result items in user messages
+                                    if item.get("type") == "text":
+                                        txt = self.clean_user_text(item.get("text", ""))
+                                        if txt:
+                                            text_parts.append(txt)
+
+                        if text_parts:
+                            full_user_text = "\n".join(text_parts).strip()
+                            if full_user_text:
+                                if curr_user_text is not None:
+                                    asst_ans = "\n\n".join(curr_assistant_texts).strip()
+                                    self.qa_pairs.append({
+                                        "user": curr_user_text,
+                                        "assistant": asst_ans,
+                                        "timestamp": curr_user_ts
+                                    })
+                                    self.user_messages.append(curr_user_text)
+                                    if asst_ans:
+                                        self.assistant_messages.append(asst_ans)
+                                curr_user_text = full_user_text
+                                curr_user_ts = timestamp
+                                curr_assistant_texts = []
 
                     elif m_type == "assistant":
                         content = msg.get("content")
-                        text_parts = []
-                        if isinstance(content, list):
+                        if isinstance(content, str):
+                            txt = content.strip()
+                            if txt and txt != "No response requested.":
+                                curr_assistant_texts.append(txt)
+                        elif isinstance(content, list):
                             for item in content:
                                 if isinstance(item, dict) and item.get("type") == "text":
-                                    text_parts.append(item.get("text", ""))
-                        elif isinstance(content, str):
-                            text_parts.append(content)
+                                    txt = item.get("text", "").strip()
+                                    if txt and txt != "No response requested.":
+                                        curr_assistant_texts.append(txt)
 
-                        text = "\n".join(text_parts).strip()
-                        if text and text != "No response requested.":
-                            self.assistant_messages.append(text)
-                            self.turns.append({
-                                "role": "assistant",
-                                "content": text,
-                                "timestamp": timestamp
-                            })
                 except Exception:
                     pass
 
-        print(f"✅ Found {len(self.user_messages)} user prompts and {len(self.assistant_messages)} assistant responses.")
+        if curr_user_text is not None:
+            asst_ans = "\n\n".join(curr_assistant_texts).strip()
+            self.qa_pairs.append({
+                "user": curr_user_text,
+                "assistant": asst_ans,
+                "timestamp": curr_user_ts
+            })
+            self.user_messages.append(curr_user_text)
+            if asst_ans:
+                self.assistant_messages.append(asst_ans)
+
+        print(f"✅ Extracted {len(self.qa_pairs)} clean user-assistant QA turns.")
+
+    @staticmethod
+    def encode_varint(n):
+        buf = bytearray()
+        while True:
+            towrite = n & 0x7f
+            n >>= 7
+            if n:
+                buf.append(towrite | 0x80)
+            else:
+                buf.append(towrite)
+                break
+        return bytes(buf)
+
+    @classmethod
+    def build_user_payload(cls, template_payload, orig_text_bytes, new_text_str):
+        new_bytes = new_text_str.encode("utf-8")
+        pos1 = template_payload.find(orig_text_bytes)
+        if pos1 == -1:
+            return template_payload
+        pos2 = template_payload.find(orig_text_bytes, pos1 + len(orig_text_bytes))
+        if pos2 == -1:
+            return template_payload
+
+        part0 = template_payload[:pos1 - 1]
+        part1 = template_payload[pos1 + len(orig_text_bytes) : pos2 - 1]
+        part2 = template_payload[pos2 + len(orig_text_bytes):]
+
+        return (
+            part0 + 
+            b"\x12" + cls.encode_varint(len(new_bytes)) + new_bytes + 
+            part1 + 
+            b"\x0a" + cls.encode_varint(len(new_bytes)) + new_bytes + 
+            part2
+        )
+
+    @classmethod
+    def build_assistant_payload(cls, template_payload, orig_text_bytes, new_text_str):
+        new_bytes = new_text_str.encode("utf-8")
+        pos1 = template_payload.find(orig_text_bytes)
+        if pos1 == -1:
+            return template_payload
+        pos2 = template_payload.find(orig_text_bytes, pos1 + len(orig_text_bytes))
+        if pos2 == -1:
+            return template_payload
+
+        part0 = template_payload[:pos1 - 1]
+        part1 = template_payload[pos1 + len(orig_text_bytes) : pos2 - 1]
+        part2 = template_payload[pos2 + len(orig_text_bytes):]
+
+        return (
+            part0 + 
+            b"\x0a" + cls.encode_varint(len(new_bytes)) + new_bytes + 
+            part1 + 
+            b"\x42" + cls.encode_varint(len(new_bytes)) + new_bytes + 
+            part2
+        )
 
     def create_native_session(self):
-        """Create native Antigravity CLI session with valid DB initialization and 100% exact Claude transcript matching."""
-        if not self.turns:
-            raise ValueError("No user prompts or responses found in the Claude JSONL file!")
+        """Create native Antigravity CLI session with valid DB initialization, native TUI rendering, and 100% exact Claude transcript matching."""
+        if not self.qa_pairs:
+            raise ValueError("No valid user-assistant turns found in the Claude JSONL file!")
 
         print("🚀 Initializing native Antigravity session database...")
-
-        # 1. Run agy ONCE to initialize valid SQLite database in ~/.gemini/antigravity-cli/conversations/
-        init_prompt = self.user_messages[0] if self.user_messages else "Initializing converted session"
-        res = subprocess.run(
-            ["agy", "--dangerously-skip-permissions", "-p", f"Initializing session: {init_prompt[:40]}"],
-            cwd=self.target_cwd,
-            capture_output=True,
-            text=True
-        )
 
         conversations_dir = os.path.expanduser("~/.gemini/antigravity-cli/conversations")
         if not os.path.exists(conversations_dir):
             os.makedirs(conversations_dir, exist_ok=True)
 
-        db_files = [os.path.join(conversations_dir, f) for f in os.listdir(conversations_dir) if f.endswith(".db")]
-        db_files.sort(key=os.path.getmtime, reverse=True)
+        existing_dbs = set(f for f in os.listdir(conversations_dir) if f.endswith(".db") and not f.endswith(".db-shm") and not f.endswith(".db-wal"))
 
-        if not db_files:
-            raise RuntimeError("Failed to locate newly created conversation database!")
+        init_prompt = "Initializing imported session history..."
+        res = subprocess.run(
+            ["agy", "--dangerously-skip-permissions", "-p", init_prompt],
+            cwd=self.target_cwd,
+            capture_output=True,
+            text=True
+        )
 
-        new_session_id = os.path.basename(db_files[0]).replace(".db", "")
+        current_dbs = set(f for f in os.listdir(conversations_dir) if f.endswith(".db") and not f.endswith(".db-shm") and not f.endswith(".db-wal"))
+        new_dbs = list(current_dbs - existing_dbs)
+
+        if new_dbs:
+            new_session_id = new_dbs[0].replace(".db", "")
+        else:
+            db_files = [os.path.join(conversations_dir, f) for f in os.listdir(conversations_dir) if f.endswith(".db")]
+            db_files.sort(key=os.path.getmtime, reverse=True)
+            new_session_id = os.path.basename(db_files[0]).replace(".db", "")
+
         self.session_id = new_session_id
         print(f"🎉 Created Native Session ID: {new_session_id}")
 
-        # 2. Write exact 100% matched transcript to brain/<session_id>/.system_generated/logs/
+        # Populate SQLite database steps table for AGY CLI TUI and /rewind support
+        db_path = os.path.join(conversations_dir, f"{new_session_id}.db")
+        last_u_idx = 0
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            rows = cur.execute("SELECT idx, step_type, status, metadata, step_payload FROM steps").fetchall()
+
+            if len(rows) >= 3:
+                u_meta_tpl, u_payload_tpl = rows[0][3], rows[0][4]
+                a_meta_tpl, a_payload_tpl = rows[2][3], rows[2][4]
+
+                uuids_u = re.findall(rb"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", u_meta_tpl)
+                u_orig_step_uuid = uuids_u[0] if uuids_u else None
+
+                uuids_a_payload = re.findall(rb"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", a_payload_tpl)
+                a_orig_step_uuid = uuids_a_payload[3] if len(uuids_a_payload) > 3 else (uuids_a_payload[0] if uuids_a_payload else None)
+
+                u_orig_text = init_prompt.encode("utf-8")
+                a_orig_text = res.stdout.strip().encode("utf-8")
+
+                cur.execute("DELETE FROM steps;")
+
+                db_step_idx = 0
+                for pair in self.qa_pairs:
+                    u_t = pair.get("user", "").strip()
+                    a_t = pair.get("assistant", "").strip()
+
+                    if not u_t:
+                        continue
+
+                    turn_u_uuid = str(uuid.uuid4()).encode("utf-8")
+                    turn_a_uuid = str(uuid.uuid4()).encode("utf-8")
+
+                    # 1. Build USER_INPUT step
+                    u_payload = self.build_user_payload(u_payload_tpl, u_orig_text, u_t)
+                    u_meta = u_meta_tpl
+                    if u_orig_step_uuid:
+                        u_meta = u_meta.replace(u_orig_step_uuid, turn_u_uuid)
+                        u_payload = u_payload.replace(u_orig_step_uuid, turn_u_uuid)
+
+                    cur.execute(
+                        "INSERT INTO steps (idx, step_type, status, has_subtrajectory, metadata, error_details, permissions, task_details, render_info, step_payload, step_format) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (db_step_idx, 14, 3, "false", u_meta, None, None, None, None, u_payload, 0)
+                    )
+                    last_u_idx = db_step_idx
+                    db_step_idx += 1
+
+                    # 2. Build PLANNER_RESPONSE step linked to turn_u_uuid
+                    asst_text = a_t if a_t else "Completed."
+                    a_payload = self.build_assistant_payload(a_payload_tpl, a_orig_text, asst_text)
+                    a_meta = a_meta_tpl
+                    if a_orig_step_uuid:
+                        a_meta = a_meta.replace(a_orig_step_uuid, turn_a_uuid)
+                        a_payload = a_payload.replace(a_orig_step_uuid, turn_a_uuid)
+                    if u_orig_step_uuid:
+                        a_meta = a_meta.replace(u_orig_step_uuid, turn_u_uuid)
+                        a_payload = a_payload.replace(u_orig_step_uuid, turn_u_uuid)
+
+                    cur.execute(
+                        "INSERT INTO steps (idx, step_type, status, has_subtrajectory, metadata, error_details, permissions, task_details, render_info, step_payload, step_format) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (db_step_idx, 15, 3, "false", a_meta, None, None, None, None, a_payload, 0)
+                    )
+                    db_step_idx += 1
+
+                conn.commit()
+            conn.close()
+
+        except Exception as e:
+            print(f"⚠️ Warning updating SQLite steps DB: {e}")
+
+        # Write exact native transcript steps to brain/<session_id>/.system_generated/logs/
         brain_dir = os.path.expanduser(f"~/.gemini/antigravity-cli/brain/{new_session_id}/.system_generated/logs")
         os.makedirs(brain_dir, exist_ok=True)
 
         transcript_path = os.path.join(brain_dir, "transcript.jsonl")
         transcript_full_path = os.path.join(brain_dir, "transcript_full.jsonl")
 
-        # ── Group turns into clean 1-to-1 QA pairs ────────────────────────────
         now_iso = datetime.now().isoformat() + "Z"
-        qa_pairs = []
-        curr_user = None
-        curr_asst_parts = []
 
-        for turn in self.turns:
-            ts = turn.get("timestamp", now_iso)
-            if turn["role"] == "user":
-                if curr_user is not None:
-                    asst_full = "\n\n".join(curr_asst_parts).strip()
-                    qa_pairs.append((curr_user, asst_full))
-                curr_user = turn["content"]
-                curr_asst_parts = []
-            elif turn["role"] == "assistant":
-                if turn["content"]:
-                    curr_asst_parts.append(turn["content"])
+        first_u = self.qa_pairs[0].get("user", "").strip() if self.qa_pairs else "Imported Claude Session"
+        cp_content = f"{{{{ CHECKPOINT 0 }}}}\n\n# USER Objective:\n{first_u[:100]}\n\n# User Requests\n1. {first_u[:100]}\n"
 
-        if curr_user is not None:
-            asst_full = "\n\n".join(curr_asst_parts).strip()
-            qa_pairs.append((curr_user, asst_full))
-
-        if not qa_pairs:
-            raise ValueError("No valid user-assistant pairs could be constructed!")
-
-        first_prompt, first_response = qa_pairs[0]
-
-        # ── Build Summary for CONVERSATION_HISTORY step ───────────────────────
-        user_requests_summary = "\n".join(
-            f"{i+1}. {u}" for i, (u, _) in enumerate(qa_pairs)
-        )
-        conv_history_content = (
-            f"# Imported Conversation History ({len(qa_pairs)} user prompts)\n\n"
-            f"Chronological list of all user prompts in this imported Claude Code session:\n\n"
-            f"{user_requests_summary}"
-        )
-
-        # ── Assemble transcript steps ─────────────────────────────────────────
         steps = []
         step_idx = 0
 
-        # Step 0: First user prompt
-        first_turn_ts = self.turns[0].get("timestamp", now_iso)
-        steps.append({
-            "step_index": step_idx,
-            "source": "USER_EXPLICIT",
-            "type": "USER_INPUT",
-            "status": "DONE",
-            "created_at": first_turn_ts,
-            "content": f"<USER_REQUEST>\n{first_prompt}\n</USER_REQUEST>"
-        })
-        step_idx += 1
+        for i, pair in enumerate(self.qa_pairs):
+            u_text = pair.get("user", "")
+            a_text = pair.get("assistant", "")
+            ts = pair.get("timestamp", now_iso)
 
-        # Step 1: CONVERSATION_HISTORY with summary
-        steps.append({
-            "step_index": step_idx,
-            "source": "SYSTEM",
-            "type": "CONVERSATION_HISTORY",
-            "status": "DONE",
-            "created_at": first_turn_ts,
-            "content": conv_history_content
-        })
-        step_idx += 1
+            if not u_text or not u_text.strip():
+                continue
 
-        # Step 2: First assistant response
-        if first_response:
-            steps.append({
-                "step_index": step_idx,
-                "source": "MODEL",
-                "type": "PLANNER_RESPONSE",
-                "status": "DONE",
-                "created_at": first_turn_ts,
-                "content": first_response
-            })
-            step_idx += 1
-
-        # Step 3+: Remaining QA pairs
-        for u_text, a_text in qa_pairs[1:]:
             steps.append({
                 "step_index": step_idx,
                 "source": "USER_EXPLICIT",
                 "type": "USER_INPUT",
                 "status": "DONE",
-                "created_at": now_iso,
-                "content": f"<USER_REQUEST>\n{u_text}\n</USER_REQUEST>"
+                "created_at": ts,
+                "content": f"<USER_REQUEST>\n{u_text.strip()}\n</USER_REQUEST>"
             })
             step_idx += 1
 
-            if a_text:
+            if i == 0:
+                steps.append({
+                    "step_index": step_idx,
+                    "source": "SYSTEM",
+                    "type": "CHECKPOINT",
+                    "status": "DONE",
+                    "created_at": ts,
+                    "content": cp_content
+                })
+                step_idx += 1
+
+            if a_text and a_text.strip():
                 steps.append({
                     "step_index": step_idx,
                     "source": "MODEL",
                     "type": "PLANNER_RESPONSE",
                     "status": "DONE",
-                    "created_at": now_iso,
-                    "content": a_text
+                    "created_at": ts,
+                    "content": a_text.strip()
                 })
                 step_idx += 1
 
@@ -298,19 +411,42 @@ class ClaudeToAgyConverter:
             for s in steps:
                 f.write(json.dumps(s, ensure_ascii=False) + "\n")
 
-        self.session_id = new_session_id
         self.register_in_summaries(new_session_id)
         return new_session_id
 
     def register_in_summaries(self, session_id):
-        """Register the converted session in SQLite conversation_summaries.db."""
-        summary_db = os.path.expanduser("~/.gemini/antigravity-cli/conversation_summaries.db")
-        if not os.path.exists(summary_db):
-            return
+        """Register the converted session in SQLite conversation_summaries.db for AGY CLI."""
+        target_path = os.path.expanduser("~/.gemini/antigravity-cli")
+        os.makedirs(target_path, exist_ok=True)
+        summary_db = os.path.join(target_path, "conversation_summaries.db")
 
         try:
             conn = sqlite3.connect(summary_db)
             cursor = conn.cursor()
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                title TEXT,
+                preview TEXT,
+                step_count INTEGER,
+                last_modified_time TEXT,
+                workspace_uris TEXT,
+                status TEXT,
+                source TEXT,
+                project_id TEXT,
+                agent_name TEXT,
+                parent_conversation_id TEXT,
+                nesting_depth INTEGER,
+                battle_id TEXT,
+                winning_conversation_id TEXT,
+                not_fully_idle INTEGER,
+                killed INTEGER,
+                last_user_input_time TEXT,
+                last_user_input_step_index INTEGER,
+                app_data_dir TEXT
+            )
+            """)
 
             first_msg = self.user_messages[0] if self.user_messages else "Imported Claude Session"
             preview_text = first_msg[:100]
@@ -321,11 +457,12 @@ class ClaudeToAgyConverter:
             cursor.execute("PRAGMA table_info(conversation_summaries)")
             cols = [row[1] for row in cursor.fetchall()]
 
+            last_u_index = (len(self.qa_pairs) - 1) * 2 if self.qa_pairs else 0
             base_values = {
                 "conversation_id": session_id,
                 "title": title_text,
                 "preview": preview_text,
-                "step_count": len(self.turns) + 1,
+                "step_count": len(self.qa_pairs) * 2 + 1,
                 "last_modified_time": now_str,
                 "workspace_uris": workspace_uri,
                 "status": "",
@@ -339,7 +476,7 @@ class ClaudeToAgyConverter:
                 "not_fully_idle": 0,
                 "killed": 0,
                 "last_user_input_time": now_str,
-                "last_user_input_step_index": 0,
+                "last_user_input_step_index": last_u_index,
                 "app_data_dir": "antigravity-cli",
             }
 
@@ -354,9 +491,44 @@ class ClaudeToAgyConverter:
             )
             conn.commit()
             conn.close()
-            print("✅ Registered session in conversation_summaries.db")
         except Exception as e:
-            print(f"⚠️  Warning registering in summaries db: {e}")
+            print(f"⚠️  Warning registering in {summary_db}: {e}")
+
+        # Update conversation_metadata.json cache for AGY CLI
+        cache_json = os.path.expanduser("~/.gemini/antigravity-cli/cache/conversation_metadata.json")
+        try:
+            os.makedirs(os.path.dirname(cache_json), exist_ok=True)
+            data = {}
+            if os.path.exists(cache_json):
+                with open(cache_json, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+            first_msg = self.user_messages[0] if self.user_messages else "Imported Claude Session"
+            now_iso = datetime.now().isoformat() + "Z"
+
+            data[session_id] = {
+                "summary": {
+                    "ID": session_id,
+                    "Title": "",
+                    "Preview": first_msg[:100],
+                    "NumSteps": len(self.qa_pairs) * 2 + 1,
+                    "Loaded": True,
+                    "UpdatedAt": now_iso,
+                    "WorkspaceURIs": [f"file://{self.target_cwd}"],
+                    "AppDataDir": "antigravity-cli",
+                    "ProjectID": "default-cli-project",
+                    "AgentName": ""
+                },
+                "is_internal": False,
+                "last_modified_time": now_iso
+            }
+
+            with open(cache_json, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"⚠️  Warning updating cache {cache_json}: {e}")
+
+        print("✅ Registered session for AGY CLI context memory.")
 
 
 

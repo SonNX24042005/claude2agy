@@ -76,6 +76,9 @@ class AgyToClaudeConverter:
                         if "<USER_REQUEST>" in clean_text:
                             clean_text = clean_text.split("<USER_REQUEST>")[1].split("</USER_REQUEST>")[0].strip()
 
+                        if "<IMPORTED_CONVERSATION_HISTORY>" in clean_text or "Initializing imported session history." in clean_text:
+                            continue
+
                         cur_uuid = str(uuid.uuid4())
                         record = {
                             "parentUuid": parent_uuid,
