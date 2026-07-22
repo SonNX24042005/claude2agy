@@ -1,14 +1,75 @@
 import argparse
 import sys
 import os
+import platform
+import subprocess
+
 try:
     from .converter import ClaudeToAgyConverter
     from .reverse_converter import AgyToClaudeConverter
     from .menu import select_option
+    from . import __version__
 except ImportError:
     from claude2agy.converter import ClaudeToAgyConverter
     from claude2agy.reverse_converter import AgyToClaudeConverter
     from claude2agy.menu import select_option
+    from claude2agy import __version__
+
+def update_tool():
+    """Update Claude2AGY and AGY2Claude to the latest version from GitHub."""
+    print("🔄 Checking for updates and updating Claude2AGY / AGY2Claude...")
+    
+    current_script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    install_dir = os.path.expanduser("~/.claude2agy")
+    
+    target_git_dir = None
+    if os.path.exists(os.path.join(current_script_dir, ".git")):
+        target_git_dir = current_script_dir
+    elif os.path.exists(os.path.join(install_dir, ".git")):
+        target_git_dir = install_dir
+
+    if target_git_dir:
+        print(f"📦 Git repository detected at: {target_git_dir}")
+        print("🔄 Pulling latest changes from GitHub...")
+        try:
+            res = subprocess.run(["git", "-C", target_git_dir, "pull"], capture_output=True, text=True)
+            if res.returncode == 0:
+                print("✨ Update completed successfully!")
+                print(res.stdout.strip())
+                return True
+            else:
+                print(f"⚠️ Git pull notice: {res.stderr.strip()}")
+        except Exception as e:
+            print(f"⚠️ Git pull failed: {e}")
+
+    # Fallback to online installer script
+    print("📥 Running installer script to update...")
+    is_windows = platform.system() == "Windows"
+    
+    local_installer_sh = os.path.join(current_script_dir, "install.sh")
+    local_installer_ps = os.path.join(current_script_dir, "install.ps1")
+    
+    if not is_windows and os.path.exists(local_installer_sh):
+        cmd = ["bash", local_installer_sh]
+    elif is_windows and os.path.exists(local_installer_ps):
+        cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", local_installer_ps]
+    else:
+        if is_windows:
+            cmd = ["powershell", "-Command", "iwr -useb https://raw.githubusercontent.com/SonNX24042005/claude2agy/main/install.ps1 | iex"]
+        else:
+            cmd = ["bash", "-c", "curl -fsSL https://raw.githubusercontent.com/SonNX24042005/claude2agy/main/install.sh | bash"]
+
+    try:
+        res = subprocess.run(cmd)
+        if res.returncode == 0:
+            print("\n✨ Claude2AGY / AGY2Claude updated successfully to the latest version!")
+            return True
+        else:
+            print("\n❌ Update failed. Please check your network connection or try running the installer manually.")
+            return False
+    except Exception as e:
+        print(f"\n❌ Error during update: {e}")
+        return False
 
 def main():
     parser = argparse.ArgumentParser(
@@ -34,8 +95,27 @@ def main():
         default=os.getcwd(),
         help="Working directory path for the session (defaults to current directory)."
     )
+    parser.add_argument(
+        "--update", "-u",
+        action="store_true",
+        help="Update Claude2AGY and AGY2Claude to the latest version from GitHub."
+    )
+    parser.add_argument(
+        "--version", "-v",
+        action="store_true",
+        help="Show version information."
+    )
 
     args = parser.parse_args()
+
+    if args.version:
+        print(f"Claude2AGY / AGY2Claude v{__version__}")
+        sys.exit(0)
+
+    if args.update:
+        success = update_tool()
+        sys.exit(0 if success else 1)
+
 
     try:
         if args.reverse or sys.argv[0].endswith("agy2claude"):

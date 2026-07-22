@@ -92,6 +92,8 @@ pip install -e .
 | `-f`, `--file` | Chỉ định đường dẫn file `.jsonl` của Claude Code | `claude2agy -f /path/to/session.jsonl` |
 | `-s`, `--session` | Chỉ định Antigravity Session ID | `agy2claude -s 2c3ed564-11bb-435c-b8f5` |
 | `-c`, `--cwd` | Chỉ định đường dẫn dự án đích | `claude2agy -c /path/to/target/project` |
+| `-u`, `--update` | Cập nhật công cụ lên phiên bản mới nhất từ GitHub | `claude2agy --update` |
+| `-v`, `--version` | Hiển thị thông tin phiên bản hiện tại | `claude2agy --version` |
 
 ---
 

@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="claude2agy",
-    version="1.2.0",
+    version="1.3.0",
     description="Bi-directional converter between Claude Code (.jsonl) and Antigravity CLI (agy) sessions",
     author="Antigravity Pair Programmer",
     packages=find_packages(),
